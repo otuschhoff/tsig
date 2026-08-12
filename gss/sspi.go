@@ -202,7 +202,7 @@ func (c *Client) negotiateContextWithKeytab(host, domain, username, path string)
 
 	ctx, err := wrapper.NewInitiator(options...)
 	if err != nil {
-		return "", time.Time{}, wrapGSSStage("initializing Kerberos initiator", err)
+		return "", time.Time{}, wrapGSSStage("loading keytab and obtaining initial krbtgt", err)
 	}
 
 	closeWithError := func(err error) (string, time.Time, error) {

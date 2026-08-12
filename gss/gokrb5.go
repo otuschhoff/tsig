@@ -80,7 +80,7 @@ func (c *Client) negotiateContext(host string, options []wrapper.Option[wrapper.
 
 	ctx, err := wrapper.NewInitiator(options...)
 	if err != nil {
-		return "", time.Time{}, wrapGSSStage("initializing Kerberos initiator", err)
+		return "", time.Time{}, wrapGSSStage("loading credentials and obtaining initial krbtgt", err)
 	}
 
 	hostname, _, err := net.SplitHostPort(host)
