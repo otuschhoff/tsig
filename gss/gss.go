@@ -87,6 +87,13 @@ var (
 	errNoSuchContext = errors.New("no such context")
 )
 
+func wrapGSSStage(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("GSS-TSIG %s: %w", stage, err)
+}
+
 // gssNoVerify is a dns.TsigProvider that skips any GSS-TSIG verification.
 //
 // BIND doesn't sign TKEY responses but Windows does, using the key you're

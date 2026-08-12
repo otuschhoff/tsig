@@ -1,6 +1,7 @@
 package gss
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,4 +24,12 @@ func TestGenerateSPN(t *testing.T) {
 
 	spn = generateSPN("host.example.com.")
 	assert.Equal(t, "DNS/host.example.com", spn)
+}
+
+func TestWrapGSSStage(t *testing.T) {
+	t.Parallel()
+
+	err := wrapGSSStage("getting service ticket for DNS/ns.example.com", errors.New("KRB_AP_ERR_MODIFIED"))
+	require.Error(t, err)
+	assert.EqualError(t, err, "GSS-TSIG getting service ticket for DNS/ns.example.com: KRB_AP_ERR_MODIFIED")
 }

@@ -202,7 +202,7 @@ func (c *Client) negotiateContextWithKeytab(host, domain, username, path string)
 
 	ctx, err := wrapper.NewInitiator(options...)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, wrapGSSStage("initializing Kerberos initiator", err)
 	}
 
 	closeWithError := func(err error) (string, time.Time, error) {
@@ -218,25 +218,25 @@ func (c *Client) negotiateContextWithKeytab(host, domain, username, path string)
 	flags := gssapi.ContextFlagMutual | gssapi.ContextFlagReplay | gssapi.ContextFlagInteg
 	output, cont, err := ctx.Initiate(spn, flags, nil)
 	if err != nil {
-		return closeWithError(err)
+		return closeWithError(wrapGSSStage("getting service ticket for "+spn, err))
 	}
 
 	for cont {
 		tkey, _, err := util.ExchangeTKEY(c.client, host, keyname, tsig.GSS, util.TkeyModeGSS, 3600, output, nil, "", "")
 		if err != nil {
-			return closeWithError(err)
+			return closeWithError(wrapGSSStage("authenticating to DNS server "+host, err))
 		}
 		if tkey.Header().Name != keyname {
-			return closeWithError(errDoesNotMatch)
+			return closeWithError(wrapGSSStage("authenticating to DNS server "+host, errDoesNotMatch))
 		}
 
 		input, err := hex.DecodeString(tkey.Key)
 		if err != nil {
-			return closeWithError(err)
+			return closeWithError(wrapGSSStage("decoding Kerberos token from DNS server "+host, err))
 		}
 		output, cont, err = ctx.Initiate(spn, flags, input)
 		if err != nil {
-			return closeWithError(err)
+			return closeWithError(wrapGSSStage("continuing Kerberos exchange with DNS server "+host, err))
 		}
 	}
 

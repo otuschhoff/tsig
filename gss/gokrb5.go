@@ -80,7 +80,7 @@ func (c *Client) negotiateContext(host string, options []wrapper.Option[wrapper.
 
 	ctx, err := wrapper.NewInitiator(options...)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, wrapGSSStage("initializing Kerberos initiator", err)
 	}
 
 	hostname, _, err := net.SplitHostPort(host)
@@ -99,7 +99,7 @@ func (c *Client) negotiateContext(host string, options []wrapper.Option[wrapper.
 
 	output, cont, err := ctx.Initiate(spn, flags, nil)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, wrapGSSStage("getting service ticket for "+spn, err)
 	}
 
 	var tkey *dns.TKEY
@@ -108,22 +108,22 @@ func (c *Client) negotiateContext(host string, options []wrapper.Option[wrapper.
 		// We don't care about non-TKEY answers, no additional RR's to send, and no signing
 		tkey, _, err = util.ExchangeTKEY(c.client, host, keyname, tsig.GSS, util.TkeyModeGSS, 3600, output, nil, "", "")
 		if err != nil {
-			return "", time.Time{}, err
+			return "", time.Time{}, wrapGSSStage("authenticating to DNS server "+host, err)
 		}
 
 		if tkey.Header().Name != keyname {
-			return "", time.Time{}, errDoesNotMatch
+			return "", time.Time{}, wrapGSSStage("authenticating to DNS server "+host, errDoesNotMatch)
 		}
 
 		var input []byte
 
 		if input, err = hex.DecodeString(tkey.Key); err != nil {
-			return "", time.Time{}, err
+			return "", time.Time{}, wrapGSSStage("decoding Kerberos token from DNS server "+host, err)
 		}
 
 		output, cont, err = ctx.Initiate(spn, flags, input)
 		if err != nil {
-			return "", time.Time{}, err
+			return "", time.Time{}, wrapGSSStage("continuing Kerberos exchange with DNS server "+host, err)
 		}
 	}
 
