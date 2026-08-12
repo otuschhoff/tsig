@@ -6,31 +6,86 @@ package gss
 import (
 	"encoding/hex"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/negotiate"
+	wrapper "github.com/bodgit/gssapi"
 	"github.com/bodgit/tsig"
 	"github.com/bodgit/tsig/internal/util"
 	"github.com/go-logr/logr"
 	multierror "github.com/hashicorp/go-multierror"
+	"github.com/jcmturner/gokrb5/v8/gssapi"
 	"github.com/miekg/dns"
 )
+
+type windowsContext interface {
+	generate([]byte) ([]byte, error)
+	verify([]byte, []byte) error
+	expiry() time.Time
+	close() error
+}
+
+type sspiContext struct {
+	ctx *negotiate.ClientContext
+}
+
+func (ctx *sspiContext) generate(msg []byte) ([]byte, error) {
+	return ctx.ctx.MakeSignature(msg, 0, 0)
+}
+
+func (ctx *sspiContext) verify(stripped, mac []byte) error {
+	_, err := ctx.ctx.VerifySignature(stripped, mac, 0)
+
+	return err
+}
+
+func (ctx *sspiContext) expiry() time.Time {
+	return ctx.ctx.Expiry()
+}
+
+func (ctx *sspiContext) close() error {
+	return ctx.ctx.Release()
+}
+
+type keytabContext struct {
+	ctx *wrapper.Initiator
+}
+
+func (ctx *keytabContext) generate(msg []byte) ([]byte, error) {
+	return ctx.ctx.MakeSignature(msg)
+}
+
+func (ctx *keytabContext) verify(stripped, mac []byte) error {
+	return ctx.ctx.VerifySignature(stripped, mac)
+}
+
+func (ctx *keytabContext) expiry() time.Time {
+	return ctx.ctx.Expiry()
+}
+
+func (ctx *keytabContext) close() error {
+	return ctx.ctx.Close()
+}
 
 // Client maps the TKEY name to the context that negotiated it as
 // well as any other internal state.
 type Client struct {
 	m      sync.RWMutex
 	client *dns.Client
-	ctx    map[string]*negotiate.ClientContext
+	config string
+	ctx    map[string]windowsContext
 	logger logr.Logger
 }
 
 // WithConfig sets the Kerberos configuration used.
-func WithConfig(_ string) func(*Client) error {
+func WithConfig(config string) func(*Client) error {
 	return func(c *Client) error {
-		return errNotSupported
+		c.config = config
+
+		return nil
 	}
 }
 
@@ -47,7 +102,7 @@ func NewClient(dnsClient *dns.Client, options ...func(*Client) error) (*Client, 
 
 	c := &Client{
 		client: client,
-		ctx:    make(map[string]*negotiate.ClientContext),
+		ctx:    make(map[string]windowsContext),
 		logger: logr.Discard(),
 	}
 
@@ -65,14 +120,12 @@ func (c *Client) Close() error {
 	return c.close()
 }
 
-func (c *Client) generate(ctx *negotiate.ClientContext, msg []byte) ([]byte, error) {
-	return ctx.MakeSignature(msg, 0, 0)
+func (c *Client) generate(ctx windowsContext, msg []byte) ([]byte, error) {
+	return ctx.generate(msg)
 }
 
-func (c *Client) verify(ctx *negotiate.ClientContext, stripped, mac []byte) error {
-	_, err := ctx.VerifySignature(stripped, mac, 0)
-
-	return err
+func (c *Client) verify(ctx windowsContext, stripped, mac []byte) error {
+	return ctx.verify(stripped, mac)
 }
 
 func (c *Client) negotiateContext(host string, creds *sspi.Credentials) (string, time.Time, error) {
@@ -119,7 +172,78 @@ func (c *Client) negotiateContext(host string, creds *sspi.Credentials) (string,
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	c.ctx[keyname] = ctx
+	c.ctx[keyname] = &sspiContext{ctx: ctx}
+
+	return keyname, ctx.Expiry(), nil
+}
+
+func (c *Client) negotiateContextWithKeytab(host, domain, username, path string) (string, time.Time, error) {
+	hostname, _, err := net.SplitHostPort(host)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	config := c.config
+	if config == "" {
+		config, err = defaultKerberosConfig(domain, net.JoinHostPort(hostname, "88"))
+		if err != nil {
+			return "", time.Time{}, err
+		}
+	}
+
+	realm := strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	options := []wrapper.Option[wrapper.Initiator]{
+		wrapper.WithConfig[wrapper.Initiator](config),
+		wrapper.WithDomain[wrapper.Initiator](realm),
+		wrapper.WithUsername[wrapper.Initiator](username),
+		wrapper.WithKeytab[wrapper.Initiator](path),
+		wrapper.WithLogger[wrapper.Initiator](c.logger),
+	}
+
+	ctx, err := wrapper.NewInitiator(options...)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	closeWithError := func(err error) (string, time.Time, error) {
+		return "", time.Time{}, multierror.Append(err, ctx.Close()).ErrorOrNil()
+	}
+
+	keyname, err := generateTKEYName(hostname)
+	if err != nil {
+		return closeWithError(err)
+	}
+
+	spn := generateSPN(hostname)
+	flags := gssapi.ContextFlagMutual | gssapi.ContextFlagReplay | gssapi.ContextFlagInteg
+	output, cont, err := ctx.Initiate(spn, flags, nil)
+	if err != nil {
+		return closeWithError(err)
+	}
+
+	for cont {
+		tkey, _, err := util.ExchangeTKEY(c.client, host, keyname, tsig.GSS, util.TkeyModeGSS, 3600, output, nil, "", "")
+		if err != nil {
+			return closeWithError(err)
+		}
+		if tkey.Header().Name != keyname {
+			return closeWithError(errDoesNotMatch)
+		}
+
+		input, err := hex.DecodeString(tkey.Key)
+		if err != nil {
+			return closeWithError(err)
+		}
+		output, cont, err = ctx.Initiate(spn, flags, input)
+		if err != nil {
+			return closeWithError(err)
+		}
+	}
+
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	c.ctx[keyname] = &keytabContext{ctx: ctx}
 
 	return keyname, ctx.Expiry(), nil
 }
@@ -166,8 +290,8 @@ func (c *Client) NegotiateContextWithCredentials(host, domain, username, passwor
 // keytab.
 // It returns the negotiated TKEY name, expiration time, and any error that
 // occurred.
-func (c *Client) NegotiateContextWithKeytab(_, _, _, _ string) (string, time.Time, error) {
-	return "", time.Time{}, errNotSupported
+func (c *Client) NegotiateContextWithKeytab(host, domain, username, path string) (string, time.Time, error) {
+	return c.negotiateContextWithKeytab(host, domain, username, path)
 }
 
 // DeleteContext deletes the active security context associated with the given
@@ -182,7 +306,7 @@ func (c *Client) DeleteContext(keyname string) error {
 		return errNoSuchContext
 	}
 
-	if err := ctx.Release(); err != nil {
+	if err := ctx.close(); err != nil {
 		return err
 	}
 

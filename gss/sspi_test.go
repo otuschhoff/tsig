@@ -20,12 +20,12 @@ func TestExchangeCredentials(t *testing.T) {
 func TestExchangeKeytab(t *testing.T) {
 	t.Parallel()
 
-	assert.ErrorIs(t, testExchangeKeytab(t), gss.ErrNotSupported)
+	assert.Nil(t, testExchangeKeytab(t))
 }
 
 func TestNewClientWithConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := gss.NewClient(new(dns.Client), gss.WithConfig(""))
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
