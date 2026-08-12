@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -65,7 +64,7 @@ func testEnvironmentVariables(t *testing.T) (string, string, string, string, str
 		{
 			&keytab,
 			"DNS_KEYTAB",
-			runtime.GOOS == "windows",
+			false,
 		},
 	} {
 		if v, ok := os.LookupEnv(env.name); ok {
