@@ -12,13 +12,13 @@ import (
 
 	"github.com/alexbrainman/sspi"
 	"github.com/alexbrainman/sspi/negotiate"
-	wrapper "github.com/bodgit/gssapi"
 	"github.com/bodgit/tsig"
 	"github.com/bodgit/tsig/internal/util"
 	"github.com/go-logr/logr"
 	multierror "github.com/hashicorp/go-multierror"
-	"github.com/jcmturner/gokrb5/v8/gssapi"
 	"github.com/miekg/dns"
+	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	wrapper "github.com/otuschhoff/gssapi"
 )
 
 type windowsContext interface {

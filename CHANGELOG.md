@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/otuschhoff/tsig/compare/v1.3.1...v1.3.2) (2026-09-10)
+
+### Bug Fixes
+
+* **deps:** use github.com/otuschhoff/gokrb5/v8 v8.5.3 through github.com/otuschhoff/gssapi v0.0.5.
+* **deps:** update Go dependencies, including DNS, logging, native GSSAPI, and cryptography packages.
+* Require Go 1.26.0 or newer to support the Kerberos fork.
+
 ## [1.3.1](https://github.com/bodgit/tsig/compare/v1.3.0...v1.3.1) (2026-05-20)
 
 

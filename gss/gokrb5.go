@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	wrapper "github.com/bodgit/gssapi"
 	"github.com/bodgit/tsig"
 	"github.com/bodgit/tsig/internal/util"
 	"github.com/go-logr/logr"
-	"github.com/jcmturner/gokrb5/v8/gssapi"
 	"github.com/miekg/dns"
+	"github.com/otuschhoff/gokrb5/v8/gssapi"
+	wrapper "github.com/otuschhoff/gssapi"
 )
 
 // Client maps the TKEY name to the context that negotiated it as
